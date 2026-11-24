@@ -1,0 +1,290 @@
+---
+title: "STAT641 HW6"
+author: "Liya Shi"
+date: last-modified
+geometry:
+  - margin=1in
+format:
+  pdf:
+    documentclass: article
+    pdf-engine: xelatex
+    include-in-header:
+      text: |
+        \usepackage{fvextra}
+        \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+execute:
+  warning: false
+  message: false
+---
+
+## Problem 1
+The EVEREST (Efficacy of Vasopressin antagonism in heart failuRE: outcome Study with Tolvaptan, showing the lengths that sponsors sometimes go to to create "acronyms"!) trial was designed to assess both short term and long term benefit of tolvaptan in people hospitalized with acute decompensated heart failure. Tolvaptan could be considered beneficial if either there was a long-term reduction in all-cause mortality ("superiority"), or short-term benefit with respect to clinical symptoms without an increase all-cause mortality ("non-inferiority").
+
+Suppose that we are planning the EVEREST (mortality) superiority trial using the following assumptions:
+
+- The placebo mortality rate is 10%, 25%, and 35% at 2, 6, and 12 months. Beyond 1 year it is expected to be a constant annual rate of 30.5%.
+- Tolvaptan is hoped to reduce mortality risk by 18.5% (hazard ratio of 0.815). Subjects will be randomly assigned to either tolvaptan or placebo in a 1:1 ratio.
+- Enrollment is expected to be conducted over 18 months and a total study duration of 20 months (i.e., a minimum of 2 months followup for the last subject enrolled).
+- Overall type 1 error rate will be controlled at 4.02% and type 2 error rate under the assumed reduction in mortality will be controlled at 10%.
+
+**(a) (5 pts)** Find the required number deaths to achieve the desired type 2 error rate.
+```{r}
+alpha <- 0.0402
+beta <- 0.10
+hr <- 0.815
+
+z_alpha <- qnorm(1 - alpha / 2)
+z_beta <- qnorm(1 - beta)
+
+D <- 4 * (z_alpha + z_beta)^2 / (log(hr))^2
+ceiling(D)
+```
+
+Using Schoenfeld's formula for a 1:1 randomized trial with two-sided $\alpha = 0.0402$, $\beta = 0.10$, and $\text{HR} = 0.815$, the required number of deaths is $D = 1061.08$, which rounds up to 1,062 deaths.
+
+**(b) (15 pts)** Find the required number of subjects needed to achieve the desired number of deaths.
+```{r}
+lambda1 <- -log(0.90) / 2
+lambda2 <- -log(0.75 / 0.90) / 4
+lambda3 <- -log(0.65 / 0.75) / 6
+lambda4 <- -log(1 - 0.305) / 12
+
+S0 <- function(t) {
+  ifelse(t <= 2, exp(-lambda1 * t),
+  ifelse(t <= 6, 0.90 * exp(-lambda2 * (t - 2)),
+  ifelse(t <= 12, 0.75 * exp(-lambda3 * (t - 6)),
+         0.65 * exp(-lambda4 * (t - 12)))))
+}
+
+S1 <- function(t) {
+  S0(t)^hr
+}
+
+p_death0 <- integrate(function(t) 1 - S0(t), lower = 2, upper = 20)$value / 18
+p_death1 <- integrate(function(t) 1 - S1(t), lower = 2, upper = 20)$value / 18
+
+p_bar <- (p_death0 + p_death1) / 2
+N <- D / p_bar
+ceiling(N)
+```
+
+Assuming uniform patient accrual over 18 months and a total study duration of 20 months (follow-up time uniformly distributed on $[2, 20]$ months), the average event probabilities are $P(\text{Death}_0) \approx 0.3289$ in the placebo group and $P(\text{Death}_1) \approx 0.2759$ in the tolvaptan group, yielding an overall mortality rate of $\bar{P} \approx 0.3024$. Dividing the required deaths by $\bar{P}$ yields 3,509 subjects.
+
+
+## Problem 2
+The dataset `everest.csv` contains the following variables:
+
+- `trt`: treatment group (0 = placebo, 1 = tolvaptan)
+- `time`: survival time in days
+- `status`: survival status (0 = censored, 1 = death)
+
+and consider the null hypothesis $H_0: \beta = 0$ where $\beta$ is the log-hazard ratio summarizing the difference between groups.
+
+**(a) (5 pts)** Plot cumulative mortality for the placebo group and assess whether the assumptions in the previous problem seem reasonable.
+```{r}
+library(survival)
+
+everest <- read.csv("everest.csv")
+placebo <- subset(everest, trt == 0)
+
+km_pbo <- survfit(Surv(time, status) ~ 1, data = placebo)
+
+plot(km_pbo, fun = "event", xlab = "Time (days)", ylab = "Cumulative Mortality",
+     main = "Placebo Group Cumulative Mortality vs. Design Assumptions",
+     xlim = c(0, 750), ylim = c(0, 0.5))
+
+assumed_days <- c(2, 6, 12) * 30.4375
+assumed_mort <- c(0.10, 0.25, 0.35)
+points(assumed_days, assumed_mort, col = "red", pch = 19, cex = 1.3)
+legend("topleft", legend = c("Observed KM (95% CI)", "Design Assumptions"),
+       col = c("black", "red"), lty = c(1, NA), pch = c(NA, 19))
+
+summary(km_pbo, times = assumed_days)
+```
+
+The design assumptions are not entirely reasonable because the observed placebo mortality rates are consistently lower than assumed across all time points. Specifically, the observed Kaplan-Meier cumulative mortality rates at 2, 6, and 12 months are 6.8% (vs. 10% assumed), 15.0% (vs. 25% assumed), and 25.4% (vs. 35% assumed), with all three assumed points falling well above the upper 95% confidence bound of the observed curve.
+
+**(b) (5 pts)** How might any deviations that you note affect the ability of the trial to achieve its objective? How might the trial design be adapted to accommodate any observed deviations?
+
+Because the actual placebo mortality rate is substantially lower than projected, fewer death events will accrue within the planned 20-month follow-up window than the required 1,062 deaths. Since the statistical power of a time-to-event analysis depends directly on the total number of observed events rather than sample size alone, this deficit will reduce statistical power (increasing the Type II error rate) and jeopardize the trial's ability to detect a true treatment effect. To accommodate this deviation, the trial can be adapted using an event-driven design (extending follow-up until the target number of deaths is reached) or by conducting a blinded sample size re-estimation (BSSR) to increase total enrollment.
+
+
+## Problem 3
+Using the EVEREST dataset from the previous part,
+
+**(a) (5 pts)** Compare mortality by treatment using the log-rank test.
+```{r}
+lr_test <- survdiff(Surv(time, status) ~ trt, data = everest)
+lr_test
+
+U_obs <- lr_test$obs[2] - lr_test$exp[2]
+V_fisher <- lr_test$var[2, 2]
+p_lr <- 1 - pchisq(lr_test$chisq, df = 1)
+
+c(U_obs = U_obs, V_fisher = V_fisher, p_value = p_lr)
+```
+
+From the standard log-rank test, the observed score statistic is $U(0) = 5.043$, the Fisher information variance is $V = 269.759$, and $\chi^2 = 0.0943$ ($1\text{ df}$), giving a two-sided p-value of $0.7588$. There is no statistically significant difference in all-cause mortality between the tolvaptan and placebo groups.
+
+**(b) (10 pts)** Find the randomization p-value for the test of $H_0$ using the random allocation rule.
+```{r}
+ord <- order(everest$time, -everest$status)
+time_ord <- everest$time[ord]
+status_ord <- everest$status[ord]
+trt_ord <- everest$trt[ord]
+
+N <- length(time_ord)
+n1 <- sum(trt_ord == 1)
+n0 <- sum(trt_ord == 0)
+
+unique_event_times <- sort(unique(time_ord[status_ord == 1]))
+d_j <- sapply(unique_event_times, function(t) sum(time_ord == t & status_ord == 1))
+Y_j <- sapply(unique_event_times, function(t) sum(time_ord >= t))
+haz_j <- d_j / Y_j
+
+cum_haz <- sapply(time_ord, function(t) sum(haz_j[unique_event_times <= t]))
+c_scores <- status_ord - cum_haz
+
+U_check <- sum(trt_ord * c_scores)
+U_check
+```
+
+Under the random allocation rule, treatment assignments are permuted without replacement while keeping $n_1 = 2061$ and $n_0 = 2072$ fixed, generating $\binom{4133}{2061}$ equally likely allocations. Because exact enumeration is computationally infeasible for $N = 4133$, we express the log-rank score as a linear rank statistic $U(0) = \sum_{i=1}^N Z_i c_i = 5.043$ and evaluate the exact randomization p-value via Monte Carlo sampling in part (d), yielding $p \approx 0.7581$ (which closely matches the asymptotic randomization p-value of $0.7587$). 
+
+**(c) (10 pts)** Using the randomization distribution from the random allocation rule, find the mean and variance of $U(0)$ from the previous part and perform an asymptotic test of $H_0$.
+```{r}
+mean_U_rar <- 0
+var_U_rar <- (n1 * n0) / (N * (N - 1)) * sum(c_scores^2)
+
+z_rar <- U_obs / sqrt(var_U_rar)
+p_rar_asymp <- 2 * (1 - pnorm(abs(z_rar)))
+
+c(mean_U = mean_U_rar, var_U_rar = var_U_rar, z_stat = z_rar, p_value = p_rar_asymp)
+```
+
+Under the random allocation rule, the exact randomization mean is $E[U(0)] = 0$ and the exact randomization variance is $\text{Var}_{\text{RAR}}(U(0)) = \frac{n_1 n_0}{N(N-1)}\sum_{i=1}^N c_i^2 = 269.580$. The resulting asymptotic normal test statistic is $Z = 0.3071$, yielding a two-sided p-value of $0.7587$. 
+
+**(d) (10 pts)** By random sampling using the random allocation rule, find the randomization distribution of $U(0)$ from the log-rank test, and the corresponding randomization p-value (use as many draws as necessary to achieve a reasonable approximation to p-value from part (a)). Compare the variance of $U(0)$ from the randomization distribution to that used for the log-rank test (i.e., Fisher information).
+```{r}
+set.seed(641)
+B <- 20000
+
+U_sim_rar <- replicate(B, {
+  idx1 <- sample.int(N, size = n1, replace = FALSE)
+  sum(c_scores[idx1])
+})
+
+p_sim_rar <- (sum(abs(U_sim_rar) >= abs(U_obs)) + 1) / (B + 1)
+var_sim_rar <- var(U_sim_rar)
+
+c(p_sim_rar = p_sim_rar, p_lr = p_lr,
+  var_sim_rar = var_sim_rar, var_exact_rar = var_U_rar, V_fisher = V_fisher)
+```
+
+Using $B = 20,000$ random draws under the random allocation rule, the Monte Carlo randomization p-value is $0.7581$, which closely approximates the standard log-rank p-value of $0.7588$. The empirical randomization variance is $267.943$ (with exact theoretical randomization variance $269.580$), which is virtually identical to—though very slightly smaller than—the Fisher information variance of $269.759$ used in the standard log-rank test.  
+
+**(e) (5 pts)** Repeat the previous part using complete randomization.
+```{r}
+set.seed(641)
+
+U_sim_cr <- replicate(B, {
+  z_cr <- rbinom(N, size = 1, prob = 0.5)
+  sum(z_cr * c_scores)
+})
+
+p_sim_cr <- (sum(abs(U_sim_cr) >= abs(U_obs)) + 1) / (B + 1)
+var_sim_cr <- var(U_sim_cr)
+var_exact_cr <- 0.25 * sum(c_scores^2)
+
+c(p_sim_cr = p_sim_cr, var_sim_cr = var_sim_cr, var_exact_cr = var_exact_cr, V_fisher = V_fisher)
+```
+
+Under complete randomization ($Z_i \stackrel{\text{i.i.d.}}{\sim} \text{Bernoulli}(0.5)$) with $20,000$ draws, the simulated randomization p-value is $0.7625$, and the simulated variance is $270.378$ (theoretical variance $269.516$), again closely aligning with the log-rank Fisher information variance of $269.759$. 
+
+**(f) (5 pts)** Comment on the use of these randomization distributions versus the distribution underlying the usual log-rank test.
+
+Randomization tests rely solely on the physical randomization mechanism actually used in the trial (design-based inference) and require no assumptions about random sampling from a superpopulation or parametric survival distributions, guaranteeing exact Type I error control even in non-random samples. In contrast, the standard log-rank test relies on a superpopulation model and asymptotic hypergeometric approximations conditional on risk-set totals at each failure time. In large, well-balanced trials like EVEREST ($N = 4133$), both randomization distributions and the standard log-rank distribution yield nearly identical variances and p-values, though in smaller or unbalanced samples the random allocation rule provides slightly tighter variance control by fixing group sizes.
+
+## Problem 4
+Consider the non-inferiority component of the EVEREST trial. As noted above, the 6 month placebo mortality rate was expected to be 25%. The non-inferiority margin was defined two ways:
+
+- a difference in 6 month mortality less than 5.2%
+- hazard ratio less than 1.25
+
+**(a) (5 pts)** Show that the HR of 1.25 corresponds to a 6-month mortality difference of 5.2%.
+```{r}
+S0_6_assumed <- 1 - 0.25
+HR_margin <- 1.25
+
+S1_6_assumed <- S0_6_assumed^HR_margin
+F1_6_assumed <- 1 - S1_6_assumed
+diff_assumed <- F1_6_assumed - 0.25
+diff_assumed
+```
+
+Under the proportional hazards assumption, $S_1(t) = [S_0(t)]^{\text{HR}}$. With an assumed 6-month placebo mortality of $F_0(6) = 0.25$ ($S_0(6) = 0.75$) and $\text{HR} = 1.25$, the 6-month tolvaptan survival rate is $S_1(6) = 0.75^{1.25} \approx 0.69795$, corresponding to a mortality rate of $F_1(6) = 1 - 0.69795 = 0.30205$. Thus, the 6-month mortality difference is $0.30205 - 0.25 = 0.05205 \approx \mathbf{5.2\%}$.
+
+
+**(b) (10 pts)** Assuming that the observed 6 month placebo mortality rate is the true placebo rate and that the true hazard ratio is 1.25, find the corresponding difference in the 6 month mortality. Why does it differ from the assumed margin?
+```{r}
+t_6m <- 6 * 30.4375
+km_all <- survfit(Surv(time, status) ~ trt, data = everest)
+sum_6m <- summary(km_all, times = t_6m)
+
+S0_6_obs <- sum_6m$surv[1]
+F0_6_obs <- 1 - S0_6_obs
+
+F1_6_implied <- 1 - S0_6_obs^HR_margin
+diff_implied <- F1_6_implied - F0_6_obs
+
+c(F0_6_obs = F0_6_obs, diff_implied = diff_implied)
+```
+
+Using the observed 6-month placebo mortality rate of $\hat{F}_0(6) = \mathbf{15.02\%}$ ($\hat{S}_0(6) = 0.8498$) and a true $\text{HR} = 1.25$, the implied 6-month mortality difference is $3.39\%$ (0.03389). This differs from the assumed $5.2\%$ margin because hazard ratio is a relative (multiplicative) measure while mortality difference is an absolute (additive) measure; when the baseline placebo mortality rate is lower than assumed (15.02% vs. 25%), the same 25% relative hazard increase translates into a smaller absolute difference in mortality. 
+
+**(c) (10 pts)** Find the 6-month mortality difference, its 95.98% confidence interval and determine whether the non-inferiority criterion is met. What is the p-value for the test of the non-inferiority hypothesis on the difference scale using the planned non-inferiority margin?
+```{r}
+S1_6_obs <- sum_6m$surv[2]
+F1_6_obs <- 1 - S1_6_obs
+
+se_S0 <- sum_6m$std.err[1]
+se_S1 <- sum_6m$std.err[2]
+
+diff_est <- F1_6_obs - F0_6_obs
+se_diff <- sqrt(se_S0^2 + se_S1^2)
+
+ci_diff <- diff_est + c(-1, 1) * z_alpha * se_diff
+ni_met_diff <- ci_diff[2] < 0.052
+
+z_ni_diff <- (diff_est - 0.052) / se_diff
+p_ni_diff <- pnorm(z_ni_diff)
+
+list(diff_est = diff_est, CI_95.98 = ci_diff,
+     non_inferiority_met = ni_met_diff, p_value_NI = p_ni_diff)
+```
+
+The estimated 6-month mortality difference (tolvaptan minus placebo) is $0.94\%$ (0.00940), with a 95.98% confidence interval of $(-1.43\%, 3.31\%)$. Because the upper bound ($3.31\%$) is less than the non-inferiority margin of $5.2\%$, the non-inferiority criterion is met. The one-sided p-value for testing $H_0: \Delta \ge 0.052$ vs. $H_1: \Delta < 0.052$ is $0.000112$. 
+
+**(d) (10 pts)** Find the estimated hazard ratio and 95.98% confidence interval and determine whether the non-inferiority criterion is met. What is the p-value for the test of the non-inferiority hypothesis on the hazard ratio scale?
+```{r}
+cox_fit <- coxph(Surv(time, status) ~ trt, data = everest)
+beta_hat <- coef(cox_fit)
+se_beta <- sqrt(vcov(cox_fit)[1, 1])
+
+hr_est <- exp(beta_hat)
+ci_hr <- exp(beta_hat + c(-1, 1) * z_alpha * se_beta)
+ni_met_hr <- ci_hr[2] < 1.25
+
+z_ni_hr <- (beta_hat - log(1.25)) / se_beta
+p_ni_hr <- pnorm(z_ni_hr)
+
+list(hr_est = hr_est, CI_95.98 = ci_hr,
+     non_inferiority_met = ni_met_hr, p_value_NI = p_ni_hr)
+```
+
+From the Cox proportional hazards model, the estimated hazard ratio is $1.019$, with a 95.98% confidence interval of $(0.899, 1.154)$. Because the upper bound ($1.154$) is below the non-inferiority margin of $1.25$, the non-inferiority criterion is met. The one-sided p-value for testing $H_0: \text{HR} \ge 1.25$ vs. $H_1: \text{HR} < 1.25$ is $0.000390$.
+
+**(e) (5 pts)** Why might the p-values from the previous two parts differ?
+
+The p-values from parts (c) and (d) differ for several reasons:Lower-than-expected baseline event rate: Because the observed 6-month placebo mortality rate (15.02%) was much lower than the 25% assumed at design, the fixed $5.2\%$ risk difference margin became substantially more lenient than $\text{HR} = 1.25$ (corresponding to an implied $\text{HR} \approx 1.39$ at 6 months), yielding a smaller p-value on the difference scale.Time horizon of data used: Part (c) evaluates cumulative mortality strictly at a single landmark time point (6 months), ignoring events and follow-up beyond 6 months, whereas the Cox model in part (d) incorporates all survival data across the entire study duration.Scale and potential non-proportional hazards: Risk difference is an additive absolute scale at a fixed time, whereas hazard ratio is a multiplicative relative rate averaged over time; if the treatment effect varies slightly over follow-up, the two metrics will weigh early versus late events differently.
+
